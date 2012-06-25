@@ -14,13 +14,18 @@ default[:rabbitmq][:config] = "/etc/rabbitmq/rabbitmq"
 # rabbitmq.config defaults
 default[:rabbitmq][:default_user] = 'guest'
 default[:rabbitmq][:default_pass] = 'guest'
+default[:rabbitmq][:memory_watermark] = 0.7
 
-#clustering
+# clustering
 default[:rabbitmq][:cluster] = false
 default[:rabbitmq][:cluster_disk_nodes] = []
 default[:rabbitmq][:erlang_cookie] = 'AnyAlphaNumericStringWillDo'
 
-#ssl
+# directories
+default[:rabbitmq][:data_directory] = '/var/lib/rabbitmq'
+default[:rabbitmq][:log_directory] = '/var/log/rabbitmq'
+
+# ssl
 default[:rabbitmq][:ssl] = false
 default[:rabbitmq][:ssl_port] = '5671'
 default[:rabbitmq][:ssl_cacert] = '/path/to/cacert.pem'

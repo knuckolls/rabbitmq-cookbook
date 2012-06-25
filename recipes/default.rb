@@ -59,6 +59,69 @@ when "redhat", "centos", "scientific"
   end
 end
 
+unless File.exists?('/var/lib/rabbitmq/.custom_directories_set')
+  
+  execute "rabbitmq-stop" do
+    command "setsid /etc/init.d/rabbitmq-server stop"
+    action :run
+  end
+  
+  if node[:rabbitmq][:data_directory] != '/var/lib/rabbitmq'
+    directory node[:rabbitmq][:data_directory] do
+      mode "0775"
+      owner "rabbitmq"
+      group "rabbitmq"
+      action :create
+      recursive true
+    end
+    
+    bash "move-data-dir" do
+      user "root"
+      code <<-EOH
+      mv /var/lib/rabbitmq/* #{node[:rabbitmq][:data_directory]}
+      rm -rf /var/lib/rabbitmq/
+      EOH
+    end
+  
+    link "/var/lib/rabbitmq" do
+      to node[:rabbitmq][:data_directory]
+    end 
+  end
+  
+  if node[:rabbitmq][:log_directory] != '/var/log/rabbitmq'
+    directory node[:rabbitmq][:log_directory] do
+      mode "0775"
+      owner "rabbitmq"
+      group "rabbitmq"
+      action :create
+      recursive true
+    end
+    
+    bash "move-log-dir" do
+      user "root"
+      code <<-EOH
+      mv /var/log/rabbitmq #{node[:rabbitmq][:log_directory]}
+      EOH
+    end
+  
+    link "/var/log/rabbitmq" do
+      to node[:rabbitmq][:log_directory]
+    end
+  end
+  
+  execute "rabbitmq-start" do
+    command "setsid /etc/init.d/rabbitmq-server start"
+    action :run
+  end
+  
+  bash "make-directory-changes-one-time-idempotent" do
+    user "root"
+    code <<-EOH
+    touch /var/lib/rabbitmq/.custom_directories_set
+    EOH
+  end
+end
+
 if File.exists?('/var/lib/rabbitmq/.erlang.cookie')
   @existing_erlang_key =  File.read('/var/lib/rabbitmq/.erlang.cookie')
 else
@@ -70,7 +133,7 @@ if node[:rabbitmq][:cluster] and node[:rabbitmq][:erlang_cookie] != @existing_er
       command "setsid /etc/init.d/rabbitmq-server stop"
       action :run
     end
-
+    
     template "/var/lib/rabbitmq/.erlang.cookie" do
       source "doterlang.cookie.erb"
       owner "rabbitmq"
@@ -84,12 +147,50 @@ if node[:rabbitmq][:cluster] and node[:rabbitmq][:erlang_cookie] != @existing_er
     end
 end
 
+
+if node[:rabbitmq][:cluster] and (! File.exists?('/var/lib/rabbitmq/.cluster_setup') )
+
+  rabbitmq_nodes = search(:node,"role:#{node[:rabbitmq][:rabbitmq_role]} AND chef_environment:#{node.chef_environment}")
+
+  other_cluster_nodes = rabbitmq_nodes.reject { |n| n.name == node.name }.collect { |n| "'rabbit@#{n.name}'" }.join(" ")
+  cluster_setup_line  = "#{other_cluster_nodes} 'rabbit@#{node.name}'"
+  
+  bash "setup-cluster" do
+    user "root"
+    code <<-EOH
+    setsid rabbitmqctl stop_app
+    setsid rabbitmqctl reset
+    setsid rabbitmqctl cluster #{cluster_setup_line}
+    setsid rabbitmqctl start_app
+    setsid rabbitmqctl cluster_status
+    EOH
+    not_if do
+      rabbitmq_nodes.size == 0
+    end
+  end
+  
+  bash "make-clustering-one-time-idempotent" do
+    user "root"
+    code <<-EOH
+    touch /var/lib/rabbitmq/.cluster_setup
+    EOH
+  end
+end
+
 template "/etc/rabbitmq/rabbitmq.config" do
   source "rabbitmq.config.erb"
   owner "root"
   group "root"
   mode 0644
   notifies :restart, "service[rabbitmq-server]", :immediately
+end
+
+template "/etc/rabbitmq/enabled_plugins" do
+  source "enabled_plugins.erb"
+  owner "root"
+  group "root"
+  mode 0644
+  notifies :restart, "service[rabbitmq-server]"
 end
 
 ## You'll see setsid used in all the init statements in this cookbook. This 
